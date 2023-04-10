@@ -24,8 +24,6 @@ app = Flask(__name__)
 
 fdb.api_version(710)
 
-default_model="gpt-3.5-turbo"
-
 class Chatbot:
     def __init__(self):
         self.default_model = "gpt-3.5-turbo"
@@ -37,17 +35,12 @@ class Chatbot:
             "/help": {"func": self.do_show_help, "desc": "Display help"},
             "/?": {"func": self.do_show_help, "desc": "Display help"}
         }
-		self.db = fdb.open(cluster_file="./fdb.cluster")
+        self.db = fdb.open(cluster_file="./fdb.cluster")
 
-    @app.route(f"{ENTRY_FUNC_NAME}", methods=["POST"])
-    def callback(self):
+    def process_request(self, user_id, user_input):
         reply = "default reply"
         try:
-            data = request.get_json()
-            user_id = data.get("user_id")
-            user_input = data.get("user_input")
-
-            if debug["verbose"]: print(f"user={user_id}, input={user_input}")
+            if debug["verbose"]: print(f"@@@ process_request user={user_id}, input={user_input}")
 
             if user_input.startswith("/"):
                 reply = self.handle_command(user_id, user_input)
@@ -56,13 +49,13 @@ class Chatbot:
         except Exception as e:
             reply = "Error: " + str(e)
         if debug["verbose"]: print(reply)
-        return jsonify({"status": "success", "message": reply}), 200
+        return reply
 
     def handle_command(self, user_id, user_input):
         if debug["verbose"]: print(f"@@@ handle_command: {user_id}:{user_input}\n")
 
         try:
-            v = all_cmd[user_input]
+            v = self.all_cmd[user_input]
         except KeyError:
             return f"Invalid command: {user_input}"
         return v["func"](self.db, user_id, user_input)
@@ -72,7 +65,7 @@ class Chatbot:
     def do_show_model(self, tr, user_id, user_input):
         openai_model_gpt = []
         response = openai.Model.list()
-        print(response)
+        if debug["verbose"]: print(response)
 
         models = response.get("data")
         for m in models:
@@ -91,7 +84,7 @@ class Chatbot:
     @fdb.transactional
     def do_show_help(self, tr, user_id, user_input):
         msg = ""
-        for cmd, value in all_cmd.items():
+        for cmd, value in self.all_cmd.items():
             msg = msg + cmd + ":" + value["desc"] + "\n"
         return msg
 
@@ -179,15 +172,15 @@ class Chatbot:
         s1 = self.get_seq_tuple(user_id, "latest")
         seq_s0 = int.from_bytes(tr[s0], byteorder='little')
         seq_s1 = int.from_bytes(tr[s1], byteorder='little')
-        if (seq_s1 - seq_s0) > (max_gap + random.randint(0, 10)):
+        if (seq_s1 - seq_s0) > (self.max_gap + random.randint(0, 10)):
             tr[s0] = (seq_s1 - 30).to_bytes(8, byteorder='little')
 
     def handle_chat(self, user_id, user_input):
         if debug["verbose"]: print(f"@@@ handle_chat: {user_id}={user_input}\n")
 
-        self.check_user(db, user_id)
+        self.check_user(self.db, user_id)
 
-        history = self.do_show_history(db, user_id)
+        history = self.do_show_history(self.db, user_id)
         prompt = f"{history}\nUser: {user_input}\nAssistant: "
 
         response = openai.ChatCompletion.create(
@@ -198,10 +191,20 @@ class Chatbot:
         )
 
         assistant_reply = response.choices[0].message["content"]
-        self.update_history(db, user_id, user_input, assistant_reply)
-        self.adjust_seq(db, user_id)
+        self.update_history(self.db, user_id, user_input, assistant_reply)
+        self.adjust_seq(self.db, user_id)
         return assistant_reply
 
+chatbot = Chatbot()
+
+@app.route(f"{ENTRY_FUNC_NAME}", methods=["POST"])
+def callback():
+    data = request.get_json()
+    user_id = data.get("user_id")
+    user_input = data.get("user_input")
+
+    reply = chatbot.process_request(user_id, user_input)
+    return jsonify({"status": "success", "message": reply}), 200
+
 if __name__ == "__main__":
-    chatbot = ChatBot()
     app.run(host="0.0.0.0", port=SRV_PORT)
