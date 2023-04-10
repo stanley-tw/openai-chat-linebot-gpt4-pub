@@ -75,14 +75,14 @@ class Chatbot:
 
         msg = ""
         for m in openai_model_gpt:
-            if m == default_model:
+            if m == self.default_model:
                 msg = msg + m + " (active)\n"
             else:
                 msg = msg + m + "\n"
         return msg
 
     @fdb.transactional
-    def do_show_help(self, tr, user_id, user_input):
+    def do_show_help(self, tr, user_id, var_ignored):
         msg = ""
         for cmd, value in self.all_cmd.items():
             msg = msg + cmd + ":" + value["desc"] + "\n"
@@ -99,7 +99,7 @@ class Chatbot:
         return k
 
     @fdb.transactional
-    def do_clear(self, tr, user_id, user_input):
+    def do_clear(self, tr, user_id, var_ignored):
         if debug["verbose"]: print(f"@@@ do_clear: user_id={user_id}\n")
 
         s0 = self.get_seq_tuple(user_id, "prev")
@@ -112,7 +112,7 @@ class Chatbot:
         return "Conversation history cleared"
 
     @fdb.transactional
-    def do_show_history(self, tr, user_id):
+    def do_show_history(self, tr, user_id, var_ignored):
         if debug["verbose"]: print(f"@@@ do_show_history: user_id={user_id}\n")
 
         s0 = self.get_seq_tuple(user_id, "prev")
@@ -180,7 +180,7 @@ class Chatbot:
 
         self.check_user(self.db, user_id)
 
-        history = self.do_show_history(self.db, user_id)
+        history = self.do_show_history(self.db, user_id, user_input)
         prompt = f"{history}\nUser: {user_input}\nAssistant: "
 
         response = openai.ChatCompletion.create(
